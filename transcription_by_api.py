@@ -6,6 +6,8 @@ from openai.types.audio import (
     TranscriptionSegment,
 )
 
+filename = input("filename to save the result as:")
+
 load_dotenv()  # take environment variables from .env.
 
 client: TranscriptionSegment = OpenAI(
@@ -26,7 +28,7 @@ transcription_data = transcription.to_dict()
 with open('data.json', 'w', encoding='utf-8') as f:
     json.dump(transcription_data, f, ensure_ascii=False, indent=4)
 
-with open('./data/scripts.txt', 'w', encoding='utf-8') as f:
+with open(f'./data/{filename}.txt', 'w', encoding='utf-8') as f:
     for line_segment in transcription_data["segments"]:
         start = line_segment["start"]
         end = line_segment["end"]
