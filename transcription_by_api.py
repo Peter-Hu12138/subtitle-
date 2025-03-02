@@ -34,12 +34,12 @@ def chunk_audio(filename: str) -> tuple[list[str], list[int]]:
     chunk the audio file at temp folder ./audio/filename/audio.wav into pieces, named as output_#.wav
     returns the number of pieces
     """
-    cmd = ['ffmpeg', '-i', f'./audio/{filename}/audio.wav', '-c', 'copy', '-map','0', '-segment_time', '00:01:00', '-f', 'segment', "-reset_timestamps", "1",  f'./audio/{filename}/output_%03d.mp4']
+    cmd = ['ffmpeg', '-i', f'./audio/{filename}/audio.wav', '-c', 'copy', '-map','0', '-segment_time', '00:01:00', '-f', 'segment', "-reset_timestamps", "1",  f'./audio/{filename}/output_%03d.wav']
     result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if result.returncode != 0:
         raise ValueError(f"Could not chunk the audio file error output:{result.stderr} output:{result.stdout}")
     filename_list = next(os.walk(f"./audio/{filename}"), (None, None, []))[2]
-    filename.remove("audio.wav")
+    filename_list.remove("audio.wav")
     filename_list.sort()
     len_list = []
     for name in filename_list:
@@ -57,6 +57,9 @@ client = OpenAI(
 if not os.path.isdir("./output"): # make sure output folder exists
    os.makedirs("./output")
 
+if not os.path.isdir("./data"): # make sure output folder exists
+   os.makedirs("./data")
+
 filename = input("file to operate to save the result as:")
 
 if not os.path.isfile(f"./input/{filename}"):
@@ -71,7 +74,7 @@ path = f"./input/{filename}"
 if filename.endswith("mp4") or filename.endswith("avi"):
     extract_audio(filename)
 
-original_audio_len = get_audio_length(filename)
+original_audio_len = get_audio_length(filename, "audio.wav")
 if original_audio_len / 60 > 10: # TODO: set the threshold to a reasonable value
     filename_list, len_list = chunk_audio(filename) # TODO: chunk the audio file
 else:
@@ -79,8 +82,8 @@ else:
 
 last_segment_ended_at = 0
 index = 1
-for i in range(0, 1):
-    path = f"./audio/{filename}"
+for i in range(len(filename_list)):
+    path = f"./audio/{filename}/{filename_list[i]}"
     transcription = client.audio.transcriptions.create(
         model="whisper-1",
         file=Path(path),
@@ -88,14 +91,13 @@ for i in range(0, 1):
         response_format="verbose_json",
     )
 
-    audio = AudioSegment.from_mp3(path)
     transcription_data = transcription.to_dict()
 
     if DEBUG:
         with open(f'./data/{filename}_data_{i}.json', 'w', encoding='utf-8') as f:
             json.dump(transcription_data, f, ensure_ascii=False, indent=4)
 
-    with open(f'./data/{filename}.srt', 'a', encoding='utf-8') as f: # processing each chunked file
+    with open(f'./output/{filename}.srt', 'a', encoding='utf-8') as f: # processing each chunked file
         for line_segment in transcription_data["segments"]:
             start = last_segment_ended_at + line_segment["start"]
             end = last_segment_ended_at + line_segment["end"]
@@ -104,4 +106,4 @@ for i in range(0, 1):
             end = seconds_to_str_in_srt(end)
             f.write(f"{index} \n{start} --> {end} \n{segment_text}\n\n")
             index += 1
-    last_segment_ended_at += len(audio)
+    last_segment_ended_at += len_list[i]
