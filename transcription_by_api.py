@@ -7,7 +7,10 @@ from utils.formatting import seconds_to_str_in_srt
 import subprocess, shutil
 
 def extract_audio(filename: str):
-    command = f"ffmpeg -i ./input/{filename} -ab 160k -ac 2 -ar 44100 -vn ./audio/{filename}/audio.wav"
+    """
+    Normalize into an audio.mp3 audio file
+    """
+    command = f"ffmpeg -i ./input/{filename} -ab 160k -ac 2 -ar 44100 -vn ./audio/{filename}/audio.mp3"
     result: subprocess.CompletedProcess = subprocess.run(command, text=True, shell=True)
     result.check_returncode()
 
@@ -30,15 +33,15 @@ def get_audio_length(uploaded_filename: str, file: str):
 
 def chunk_audio(filename: str) -> tuple[list[str], list[int]]:
     """
-    chunk the audio file at temp folder ./audio/filename/audio.wav into pieces, named as output_#.wav
+    chunk the audio file at temp folder ./audio/filename/audio.mp3 into pieces, named as output_#.mp3
     returns the number of pieces
     """
-    cmd = ['ffmpeg', '-i', f'./audio/{filename}/audio.wav', '-c', 'copy', '-map','0', '-segment_time', '00:05:00', '-f', 'segment', "-reset_timestamps", "1",  f'./audio/{filename}/output_%03d.wav']
+    cmd = ['ffmpeg', '-i', f'./audio/{filename}/audio.mp3', '-c', 'copy', '-map','0', '-segment_time', '00:15:00', '-f', 'segment', "-reset_timestamps", "1",  f'./audio/{filename}/output_%03d.mp3']
     result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if result.returncode != 0:
         raise ValueError(f"Could not chunk the audio file error output:{result.stderr} output:{result.stdout}")
     filename_list = next(os.walk(f"./audio/{filename}"), (None, None, []))[2]
-    filename_list.remove("audio.wav")
+    filename_list.remove("audio.mp3")
     filename_list.sort()
     len_list = []
     for name in filename_list:
@@ -47,9 +50,21 @@ def chunk_audio(filename: str) -> tuple[list[str], list[int]]:
 
 
 DEBUG = True
-IF_FUSE = True
+IF_FUSE = False
 FUSE_TYPE = 1 # whether to integrate the subtitle file into the video file
 FUSE_DICT = {1: "hardcode", 2: "track"}
+TRANSLATION = "EN"
+TRANSLATION_LIST = {'af': 'Afrikaans', 'ar': 'Arabic', 'az': 'Azerbaijani', 'be': 'Belarusian', 'bg': 'Bulgarian', 'bs': 'Bosnian', 
+                    'ca': 'Catalan; Valencian', 'cs': 'Czech', 'cu': 'Church Slavic; Old Slavonic; Church Slavonic; Old Bulgarian; Old Church Slavonic', 
+                    'cy': 'Welsh', 'da': 'Danish', 'de': 'German', 'el': 'Greek, Modern (1453-)', 'en': 'English', 'es': 'Spanish; Castilian', 'et': 'Estonian', 
+                    'fa': 'Persian', 'fi': 'Finnish', 'fr': 'French', 'gl': 'Galician', 'he': 'Hebrew', 'hi': 'Hindi', 'hr': 'Croatian', 'hu': 'Hungarian', 
+                    'hy': 'Armenian', 'id': 'Indonesian', 'is': 'Icelandic', 'it': 'Italian', 'ja': 'Japanese', 'kk': 'Kazakh', 'kn': 'Kannada', 'ko': 'Korean', 
+                    'lt': 'Lithuanian', 'lv': 'Latvian', 'mi': 'Maori', 'mk': 'Macedonian', 'ml': 'Malayalam', 'mr': 'Marathi', 'ms': 'Malay', 
+                    'nb': 'Bokmål, Norwegian; Norwegian Bokmål', 'ne': 'Nepali', 'nl': 'Dutch; Flemish', 'nn': 'Norwegian Nynorsk; Nynorsk, Norwegian', 
+                    'no': 'Norwegian', 'pi': 'Pali', 'pl': 'Polish', 'pt': 'Portuguese', 'ro': 'Romanian; Moldavian; Moldovan', 'ru': 'Russian', 'sk': 'Slovak', 
+                    'sl': 'Slovenian', 'sr': 'Serbian', 'sv': 'Swedish', 'sw': 'Swahili', 'ta': 'Tamil', 'th': 'Thai', 'tl': 'Tagalog', 'tr': 'Turkish', 'uk': 'Ukrainian',
+                    'ur': 'Urdu', 'vi': 'Vietnamese', 'zh': 'Chinese'}
+
 load_dotenv()  # take environment variables from .env.
 
 client = OpenAI(
@@ -74,17 +89,27 @@ if not os.path.isdir(f"./audio/{filename}"): # create a temp folder for processi
 
 path = f"./input/{filename}"
 try:
-    if filename.endswith("mp4") or filename.endswith("avi"):
-        extract_audio(filename)
+    extract_audio(filename)
 
-    original_audio_len = get_audio_length(filename, "audio.wav")
-    if original_audio_len / 60 > 10: # TODO: set the threshold to a reasonable value
+    original_audio_len = get_audio_length(filename, "audio.mp3")
+    if original_audio_len / 60 > 20: # TODO: set the threshold to a reasonable value
         filename_list, len_list = chunk_audio(filename)
     else:
-        filename_list, len_list = ["audio.wav"], [original_audio_len]
+        filename_list, len_list = ["audio.mp3"], [original_audio_len]
 
+    if TRANSLATION != "NONE":
+        pass
+        # no translation
+    elif TRANSLATION == "en":
+        pass
+        # translate into eng, use whisper
+    else:
+        # translate into non-eng, use grok
+        pass
+        
     last_segment_ended_at = 0
     index = 1
+    # TODO, clear previously generated file
     for i in range(len(filename_list)):
         # do not process that is too short for openai whisper
         if len_list[i] < 0.1:
