@@ -2,6 +2,8 @@
 /prompt.md
 /whisper.json
 .env
+.venv
 /data
 /data.json
 /audio
+.DS_Store
