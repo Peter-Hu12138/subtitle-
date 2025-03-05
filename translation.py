@@ -12,10 +12,31 @@ client = OpenAI(
 def translate(content: str, target_language: str, original_language: str = "(please detect it your)") -> str:
     # basic  prompt (review after first version)
     basic_prompt = \
-    f"""you are a professional translator who works. You translate according to the context and always try to sound as natural and native as possible in target language. If the jokes or meanings do not translate naturally into the target language, you understand it is better to sound natural even if the sacrifice in accuracy is big as long as the overall meanings align. Translate the following {original_language} segments into {target_language}. Preserve the line structure perfectly (if there was n lines then output n lines), i.e. output line by line as the original lines were given. 
-    Sometimes you may be given with non-{original_language}, also translate them to {target_language}.
-    Do not output anything else but translation and indicate the start AND end of the of translation by \"@@@\".  TRANSLATE ALL THE SEGMENTS, DO NOT STOP IN THE MIDDLE.
-    """
+    f"""You are a professional translator tasked with translating text from {original_language} to {target_language}. Your translations must be contextually accurate, natural, and fluent in {target_language}. If idioms, jokes, or cultural references don’t translate directly, adapt them to sound native in {target_language} while preserving the intended meaning, even if some literal details are adjusted.
+
+### Instructions
+- Translate the following {original_language} segments into {target_language}.
+- Keep the exact line structure: if the input has 15 lines, the output must have 15 lines.
+- Translate all text into {target_language}, regardless of its original language.
+- Retain any formatting (e.g., **bold**, *italics*) from the original text.
+- Use consistent wording for repeated terms across the translation.
+- Double-check for grammatical accuracy and natural phrasing in {target_language}.
+- Output only the translation, nothing else.
+- Mark the start and end of the translation with "@@@".
+
+### Example (from English to Spanish)
+**Input (English):**
+It’s raining cats and dogs.  
+The early bird catches the worm.  
+**Bold move**, my friend!
+
+**Output (Spanish):**
+@@@
+Está lloviendo a cántaros.  
+El que madruga encuentra.  
+**Movida audaz**, ¡amigo mío!  
+@@@
+"""
     # advanced  prompt (review after first version)
     advanced_prompt = \
     f"""you are a professional translator that works for subtitle making. You translate according to the context and always try to sound as natural and native as possible in target language. If the jokes or meanings do not translate naturally into the target language, you understand it is better to sound natural even if the sacrifice in accuracy is big as long as the overall meanings align. Translate the following {original_language} segments into {target_language} while preserving the line structure perfectly, i.e. output line by line as the original lines were given. 
