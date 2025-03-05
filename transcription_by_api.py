@@ -4,6 +4,7 @@ from openai import OpenAI
 from pathlib import Path
 from openai.types.audio import Translation, TranslationVerbose, TranslationCreateResponse
 from utils.formatting import seconds_to_str_in_srt
+from translation import translate
 import subprocess, shutil
 
 def extract_audio(filename: str):
@@ -43,6 +44,9 @@ def chunk_audio(filename: str) -> tuple[list[str], list[int]]:
     filename_list = next(os.walk(f"./audio/{filename}"), (None, None, []))[2]
     filename_list.remove("audio.mp3")
     filename_list.sort()
+    if os.path.getsize(f"./audio/{filename}/{filename_list[-1]}") < 1024 * 6:
+        # if the last segment is too small
+        filename_list.pop()
     len_list = []
     for name in filename_list:
         len_list.append(get_audio_length(filename, name))
@@ -50,10 +54,10 @@ def chunk_audio(filename: str) -> tuple[list[str], list[int]]:
 
 
 DEBUG = True
-IF_FUSE = False
-FUSE_TYPE = 1 # whether to integrate the subtitle file into the video file
+IF_FUSE = True
+FUSE_TYPE = 2 # whether to integrate the subtitle file into the video file
 FUSE_DICT = {1: "hardcode", 2: "track"}
-TRANSLATION = "EN"
+TRANSLATION = "zh"
 TRANSLATION_LIST = {'af': 'Afrikaans', 'ar': 'Arabic', 'az': 'Azerbaijani', 'be': 'Belarusian', 'bg': 'Bulgarian', 'bs': 'Bosnian', 
                     'ca': 'Catalan; Valencian', 'cs': 'Czech', 'cu': 'Church Slavic; Old Slavonic; Church Slavonic; Old Bulgarian; Old Church Slavonic', 
                     'cy': 'Welsh', 'da': 'Danish', 'de': 'German', 'el': 'Greek, Modern (1453-)', 'en': 'English', 'es': 'Spanish; Castilian', 'et': 'Estonian', 
@@ -64,6 +68,7 @@ TRANSLATION_LIST = {'af': 'Afrikaans', 'ar': 'Arabic', 'az': 'Azerbaijani', 'be'
                     'no': 'Norwegian', 'pi': 'Pali', 'pl': 'Polish', 'pt': 'Portuguese', 'ro': 'Romanian; Moldavian; Moldovan', 'ru': 'Russian', 'sk': 'Slovak', 
                     'sl': 'Slovenian', 'sr': 'Serbian', 'sv': 'Swedish', 'sw': 'Swahili', 'ta': 'Tamil', 'th': 'Thai', 'tl': 'Tagalog', 'tr': 'Turkish', 'uk': 'Ukrainian',
                     'ur': 'Urdu', 'vi': 'Vietnamese', 'zh': 'Chinese'}
+ORIGINAL_LANGUAGE = "ja"
 
 load_dotenv()  # take environment variables from .env.
 
@@ -89,55 +94,115 @@ if not os.path.isdir(f"./audio/{filename}"): # create a temp folder for processi
 
 path = f"./input/{filename}"
 try:
+    # TODO, clear previously generated file
     extract_audio(filename)
 
     original_audio_len = get_audio_length(filename, "audio.mp3")
     if original_audio_len / 60 > 20: # TODO: set the threshold to a reasonable value
-        filename_list, len_list = chunk_audio(filename)
+        filename_list, len_list = chunk_audio(filename) 
+        # TODO: design decision: we might use return value of returned json file to know the duration
     else:
         filename_list, len_list = ["audio.mp3"], [original_audio_len]
 
-    if TRANSLATION != "NONE":
-        pass
-        # no translation
-    elif TRANSLATION == "en":
-        pass
-        # translate into eng, use whisper
+    if TRANSLATION == "NONE" or TRANSLATION == "en":
+        # no translation or translation into eng
+        # use whisper only
+        last_segment_ended_at = 0
+        index = 1
+        
+        for i in range(len(filename_list)):
+            # do not process that is too short for openai whisper
+            if len_list[i] < 0.1:
+                continue
+            path = f"./audio/{filename}/{filename_list[i]}"
+            if TRANSLATION == "NONE":    
+                transcription = client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=Path(path),
+                    timestamp_granularities="segment",
+                    response_format="verbose_json",
+                )
+            else:
+                transcription = client.audio.translations.create(
+                    model="whisper-1",
+                    file=Path(path),
+                    response_format="verbose_json",
+                )
+
+            transcription_data = transcription.to_dict()
+
+            if DEBUG:
+                with open(f'./data/{filename}_data_{i}.json', 'w', encoding='utf-8') as f:
+                    json.dump(transcription_data, f, ensure_ascii=False, indent=4)
+
+            with open(f'./output/{filename}/{filename}.srt', 'a', encoding='utf-8') as f: # processing each chunked file
+                for line_segment in transcription_data["segments"]:
+                    start = last_segment_ended_at + line_segment["start"]
+                    end = last_segment_ended_at + line_segment["end"]
+                    segment_text = line_segment["text"].strip()
+                    start = seconds_to_str_in_srt(start)
+                    end = seconds_to_str_in_srt(end)
+                    f.write(f"{index} \n{start} --> {end} \n{segment_text}\n\n")
+                    index += 1
+            last_segment_ended_at += len_list[i]
+    
     else:
         # translate into non-eng, use grok
-        pass
+        last_segment_ended_at = 0
+        index = 1
+        prompt = ""
+        for i in range(len(filename_list)):
+            # do not process that is too short for openai whisper
+            if len_list[i] < 0.1:
+                continue
+            path = f"./audio/{filename}/{filename_list[i]}"
+            transcription = client.audio.transcriptions.create(
+                model="whisper-1",
+                language=ORIGINAL_LANGUAGE,
+                file=Path(path),
+                prompt=prompt,
+                timestamp_granularities="segment",
+                response_format="verbose_json",
+            )
+            transcription_data = transcription.to_dict()
+            prompt = " ".join(transcription_data["text"].split()[-20:])
+            
+
+            if DEBUG:
+                with open(f'./data/{filename}_data_{i}.json', 'w', encoding='utf-8') as f:
+                    json.dump(transcription_data, f, ensure_ascii=False, indent=4)
+
+            # translation with AI
+            
+            segments = transcription_data["segments"]
+
+            with open(f'./output/{filename}/{filename}.srt', 'a', encoding='utf-8') as f: # processing each chunked file
+                while len(segments) > 0:
+                    lines = segments[:10]
+                    segments = segments[10:]
+                    for line in lines:
+                        if line["text"].strip() == "":
+                            with open(f'./error.log', 'a', encoding='utf-8') as f:
+                                f.write(f"{line}")
+                    if ORIGINAL_LANGUAGE != "NONE":
+                        translated_lines = translate("\n".join([line["text"].strip() for line in lines]), TRANSLATION_LIST[TRANSLATION], TRANSLATION_LIST[ORIGINAL_LANGUAGE])
+                    else:
+                        translated_lines = translate("\n".join([line["text"].strip() for line in lines]), TRANSLATION_LIST[TRANSLATION])
+                    translated_lines = translated_lines.splitlines() # read as a list of lines
+                    assert len(lines) == len(translated_lines)
+                    for j in range(len(lines)):
+                        line_segment = lines[j]
+                        start = last_segment_ended_at + line_segment["start"]
+                        end = last_segment_ended_at + line_segment["end"]
+                        segment_text = translated_lines[j].strip()
+                        start = seconds_to_str_in_srt(start)
+                        end = seconds_to_str_in_srt(end)
+                        f.write(f"{index} \n{start} --> {end} \n{segment_text}\n\n")
+                        index += 1
+                    
+            last_segment_ended_at += len_list[i]
         
-    last_segment_ended_at = 0
-    index = 1
-    # TODO, clear previously generated file
-    for i in range(len(filename_list)):
-        # do not process that is too short for openai whisper
-        if len_list[i] < 0.1:
-            continue
-        path = f"./audio/{filename}/{filename_list[i]}"
-        transcription = client.audio.transcriptions.create(
-            model="whisper-1",
-            file=Path(path),
-            timestamp_granularities="segment",
-            response_format="verbose_json",
-        )
-
-        transcription_data = transcription.to_dict()
-
-        if DEBUG:
-            with open(f'./data/{filename}_data_{i}.json', 'w', encoding='utf-8') as f:
-                json.dump(transcription_data, f, ensure_ascii=False, indent=4)
-
-        with open(f'./output/{filename}/{filename}.srt', 'a', encoding='utf-8') as f: # processing each chunked file
-            for line_segment in transcription_data["segments"]:
-                start = last_segment_ended_at + line_segment["start"]
-                end = last_segment_ended_at + line_segment["end"]
-                segment_text = line_segment["text"].strip()
-                start = seconds_to_str_in_srt(start)
-                end = seconds_to_str_in_srt(end)
-                f.write(f"{index} \n{start} --> {end} \n{segment_text}\n\n")
-                index += 1
-        last_segment_ended_at += len_list[i]
+    
 
     if IF_FUSE:
         # integrate subtitle file TODO
@@ -154,6 +219,6 @@ finally:
     if os.path.isdir(f"./audio/{filename}"):
         shutil.rmtree(f"./audio/{filename}")
 
-
+    pass
     # TODO, use local model
     # TODO, a GUI
