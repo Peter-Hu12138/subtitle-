@@ -68,7 +68,7 @@ TRANSLATION_LIST = {'af': 'Afrikaans', 'ar': 'Arabic', 'az': 'Azerbaijani', 'be'
                     'no': 'Norwegian', 'pi': 'Pali', 'pl': 'Polish', 'pt': 'Portuguese', 'ro': 'Romanian; Moldavian; Moldovan', 'ru': 'Russian', 'sk': 'Slovak', 
                     'sl': 'Slovenian', 'sr': 'Serbian', 'sv': 'Swedish', 'sw': 'Swahili', 'ta': 'Tamil', 'th': 'Thai', 'tl': 'Tagalog', 'tr': 'Turkish', 'uk': 'Ukrainian',
                     'ur': 'Urdu', 'vi': 'Vietnamese', 'zh': 'Chinese'}
-ORIGINAL_LANGUAGE = "en"
+ORIGINAL_LANGUAGE = "ja"
 
 load_dotenv()  # take environment variables from .env.
 
@@ -82,11 +82,11 @@ if not os.path.isdir("./data"): # make sure output folder exists
 
 filename = input("file to operate to save the result as:")
 
-if not os.path.isfile(f"./input/{filename}"):
-    raise FileNotFoundError("There is no such file in input folder, please double check")
-
 if not os.path.isdir(f"./output/{filename}/"): # make sure output folder exists
    os.makedirs(f"./output/{filename}/")
+
+if not os.path.isfile(f"./input/{filename}"):
+    raise FileNotFoundError("There is no such file in input folder, please double check")
 
 if not os.path.isdir(f"./audio/{filename}"): # create a temp folder for processing
    os.makedirs(f"./audio/{filename}")
@@ -103,8 +103,7 @@ try:
         # TODO: design decision: we might use return value of returned json file to know the duration
     else:
         filename_list, len_list = ["audio.mp3"], [original_audio_len]
-    
-    prompt = ""    
+    prompt = ""
     if TRANSLATION == "NONE" or TRANSLATION == "en":
         # no translation or translation into eng
         # use whisper only
@@ -120,39 +119,31 @@ try:
                 transcription = client.audio.transcriptions.create(
                     model="whisper-1",
                     file=Path(path),
-                    language=ORIGINAL_LANGUAGE,
                     timestamp_granularities="segment",
-                    response_format="verbose_json",
+                    response_format="srt",
+                    prompt=prompt,
                 )
             else:
                 transcription = client.audio.translations.create(
                     model="whisper-1",
                     file=Path(path),
-                    response_format="verbose_json",
+                    response_format="srt",
                 )
 
-            transcription_data = transcription.to_dict()
-            prompt = " ".join(transcription_data["text"].split()[-20:])
+            # transcription_data = transcription.to_dict()
 
             if DEBUG:
-                with open(f'./data/{filename}_data_{i}.json', 'w', encoding='utf-8') as f:
-                    json.dump(transcription_data, f, ensure_ascii=False, indent=4)
+                with open(f'./data/{filename}_data_{i}.srt', 'w', encoding='utf-8') as f:
+                    f.write(transcription)
 
-            with open(f'./output/{filename}/{filename}.srt', 'a', encoding='utf-8') as f: # processing each chunked file
-                for line_segment in transcription_data["segments"]:
-                    start = last_segment_ended_at + line_segment["start"]
-                    end = last_segment_ended_at + line_segment["end"]
-                    segment_text = line_segment["text"].strip()
-                    start = seconds_to_str_in_srt(start)
-                    end = seconds_to_str_in_srt(end)
-                    f.write(f"{index} \n{start} --> {end} \n{segment_text}\n\n")
-                    index += 1
+            
             last_segment_ended_at += len_list[i]
     
     else:
         # translate into non-eng, use grok
         last_segment_ended_at = 0
         index = 1
+        
         for i in range(len(filename_list)):
             # do not process that is too short for openai whisper
             if len_list[i] < 0.1:
@@ -167,7 +158,7 @@ try:
                 response_format="verbose_json",
             )
             transcription_data = transcription.to_dict()
-            prompt = " ".join(transcription_data["text"].split()[-20:])
+            prompt = transcription_data["text"].split()
             
 
             if DEBUG:
@@ -207,11 +198,15 @@ try:
     
 
     if IF_FUSE:
+        # integrate subtitle file TODO
         if FUSE_DICT[FUSE_TYPE] == "hardcode":
             subprocess.run(f"ffmpeg -i ./input/{filename} -vf subtitles=./output/{filename}/{filename}.srt ./output/{filename}/{filename}", shell=True)
         else:
+        # to hardcode the subtitle, use "ffmpeg -i ./input/sample_video.mp4 -vf subtitles=./output/sample_video.mp4.srt ./mysubtitledmovie.mp4"
+        # to put the subtitle in a track, use f"ffmpeg -i ./input/{filename} -i ./output/{filename}/{filename}.srt -c copy -c:s mov_text ./output/{filename}/{filename}""
             subprocess.run(f"ffmpeg -i ./input/{filename} -i ./output/{filename}/{filename}.srt -c copy -c:s mov_text ./output/{filename}/{filename}", shell=True)
 
+    # TODO translation
 finally:
     # clean the temp files
     if os.path.isdir(f"./audio/{filename}"):

@@ -1,82 +1,91 @@
-from dotenv import load_dotenv
-import os, json
-from pydub import AudioSegment
+# In your terminal, first run:
+# pip install openai
+
+import os
 from openai import OpenAI
-from pathlib import Path
-from openai.types.audio import Translation, TranslationVerbose, TranslationCreateResponse
-from utils.formatting import seconds_to_str_in_srt
-import subprocess, shutil
 
-def extract_audio(filename: str):
-    command = f"ffmpeg -i ./input/{filename} -ab 160k -ac 2 -ar 44100 -vn ./audio/{filename}/audio.wav"
-    result: subprocess.CompletedProcess = subprocess.run(command, text=True, shell=True)
-    result.check_returncode()
-
-
-def get_audio_length(uploaded_filename: str, file: str):
-    """
-    returns audio length of filename in ./input/filename in seconds
-    """
-    path = f"./audio/{uploaded_filename}/{file}"
-    command = f'ffprobe -i {path} -show_entries format=duration -v quiet -of csv="p=0"'
-    result: subprocess.CompletedProcess =  subprocess.run(command, text=True, capture_output=True, shell=True)
-    if result.returncode != 0:
-        raise ValueError("fail to get audio length")
-    
-    if result.stdout:
-        length_in_str: str = result.stdout
-        return float(length_in_str.strip())
-    else:
-        raise ValueError("fail to get audio length")
-
-def chunk_audio(filename: str) -> tuple[list[str], list[int]]:
-    """
-    chunk the audio file at temp folder ./audio/filename/audio.wav into pieces, named as output_#.wav
-    returns the number of pieces
-    """
-    cmd = ['ffmpeg', '-i', f'./audio/{filename}/audio.wav', '-c', 'copy', '-map','0', '-segment_time', '00:20:00', '-f', 'segment', "-reset_timestamps", "1",  f'./audio/{filename}/output_%03d.mp3']
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    if result.returncode != 0:
-        raise ValueError(f"Could not chunk the audio file error output:{result.stderr} output:{result.stdout}")
-    filename_list = next(os.walk(f"./audio/{filename}"), (None, None, []))[2]
-    filename_list.remove("audio.wav")
-    filename_list.sort()
-    len_list = []
-    for name in filename_list:
-        len_list.append(get_audio_length(filename, name))
-    return filename_list, len_list
-
-
-DEBUG = True
-FUSE = False # whether to integrate the subtitle file into the video file
-load_dotenv()  # take environment variables from .env.
-
+XAI_API_KEY = os.getenv("XAI_API_KEY")
 client = OpenAI(
-    api_key=os.environ.get("OPENAI_API_KEY"),  # This is the default and can be omitted
+    api_key=XAI_API_KEY,
+    base_url="https://api.x.ai/v1",
 )
 
-if not os.path.isdir("./output/{filename}/"): # make sure output folder exists
-   os.makedirs("./output/{filename}/")
+original_language = "English"
+target_language = "Chinese"
 
-if not os.path.isdir("./data"): # make sure output folder exists
-   os.makedirs("./data")
+content = \
+"""
+"""
 
-filename = input("file to operate to save the result as:")
+# basic  prompt (review after first version)
+basic_prompt = \
+f"""you are a professional translator that works for subtitle making. You translate according to the context and always try to sound as natural and native as possible in target language. If the jokes or meanings do not translate naturally into the target language, you understand it is better to sound natural even if the sacrifice in accuracy is big as long as the overall meanings align. Translate the following {original_language} segments into {target_language} while preserving the line structure perfectly, i.e. output line by line as the original lines were given. 
+Be consistent with your translation and use English nouns if there are no good alternative(like names!). Do not output anything else but translation and indicate the start AND end of the of translation by \"@@@\".  TRANSLATE ALL THE SEGMENTS, DO NOT STOP IN THE MIDDLE.
+"""
+# advanced  prompt (review after first version)
+advanced_prompt = \
+f"""you are a professional translator that works for subtitle making. You translate according to the context and always try to sound as natural and native as possible in target language. If the jokes or meanings do not translate naturally into the target language, you understand it is better to sound natural even if the sacrifice in accuracy is big as long as the overall meanings align. Translate the following {original_language} segments into {target_language} while preserving the line structure perfectly, i.e. output line by line as the original lines were given. 
+inditace the start AND end of the second version of translation by \"@@@\"
+Be consistent with your translation and use English nouns if there are no good alternative(like names!). After first version of the translation, you compare it with the original version and think critically from a native chinese point of view what might improve the naturalness of the translation and start over the second version. TRANSLATE ALL THE SEGMENTS, DONOT STOP IN THE MIDDLE.
+"""
 
-if not os.path.isfile(f"./input/{filename}"):
-    raise FileNotFoundError("There is no such file in input folder, please double check")
 
-if not os.path.isdir(f"./audio/{filename}"): # create a temp folder for processing
-   os.makedirs(f"./audio/{filename}")
+completion = client.chat.completions.create(
+    model="grok-2-latest",
+    messages=[
+        {
+            "role": "system",
+            "content": basic_prompt
+        },
+        {
+            "role": "user",
+            "content": content
+        },
+    ],
+)
+while True:
+    try:
+        completion = client.chat.completions.create(
+            model="grok-2-latest",
+            messages=[
+                {
+                    "role": "system",
+                    "content": basic_prompt
+                },
+                {
+                    "role": "user",
+                    "content": content
+                },
+            ],
+        )
+        # assert completion.choices[0].message.content.split("@@@")[1].strip().count("\n") == content.strip().count("\n")
+        print(completion.choices[0].message.content.split("@@@")[1].strip())
+        lines = completion.choices[0].message.content.split("@@@")[1].strip()
+        i = 0
+        for line in lines.splitlines():
+            print(f"{i}\n{line.strip()}\n\n")
+            i+=1
+        break
+    except AssertionError:
+        pass
 
 
-path = f"./input/{filename}"
-
-if filename.endswith("mp4") or filename.endswith("avi"):
-    extract_audio(filename)
-
-original_audio_len = get_audio_length(filename, "audio.wav")
-if original_audio_len / 60 > 10: # TODO: set the threshold to a reasonable value
-    filename_list, len_list = chunk_audio(filename)
-else:
-    filename_list, len_list = ["audio.wav"], [original_audio_len]
+"""
+@@@
+去打我吧。
+你想做什么就做什么。
+停下来。
+停下来。
+我一直想看到你这个样子。
+停下来。
+你很美。
+你就像我想的一样美。
+停下来。
+放开我。
+Akira。
+你是最棒的。
+我要每天都把你这样录下来。
+停下来。
+停下来。
+@@@
+"""

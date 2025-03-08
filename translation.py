@@ -9,18 +9,24 @@ client = OpenAI(
     api_key=XAI_API_KEY,
     base_url="https://api.x.ai/v1",
 )
-def translate(content: str, target_language: str, original_language: str = "(please detect it your)") -> str:
+def translate(content: str, target_language: str, original_language: str = "(please detect it yourself)") -> str:
+    n = content.strip().count("\n") + 1
+    print(f"translated # of lines:{n}")
+    # TODO: implement a fail save system
     # basic  prompt (review after first version)
     basic_prompt = \
     f"""You are a professional translator tasked with translating text from {original_language} to {target_language}. Your translations must be contextually accurate, natural, and fluent in {target_language}. If idioms, jokes, or cultural references don’t translate directly, adapt them to sound native in {target_language} while preserving the intended meaning, even if some literal details are adjusted.
 
 ### Instructions
 - Translate the following {original_language} segments into {target_language}.
-- Keep the exact line structure: if the input has 15 lines, the output must have 15 lines.
+- Keep the exact line structure: since INPUT HAS {n} LINE, the output MUST have {n} lines.
+- Your output MUST have {n} lines.
+- Your output MUST have {n} lines.
+- Your output MUST have {n} lines.
 - Translate all text into {target_language}, regardless of its original language.
-- Retain any formatting (e.g., **bold**, *italics*) from the original text.
 - Use consistent wording for repeated terms across the translation.
 - Double-check for grammatical accuracy and natural phrasing in {target_language}.
+- Double-check for line strcture: your output MUST have {n} lines.
 - Output only the translation, nothing else.
 - Mark the start and end of the translation with "@@@".
 
@@ -56,8 +62,9 @@ El que madruga encuentra.
                 "content": content
             },
         ],
+        temperature=0.6,
     )
-    while True:
+    for i in range(0, 3):
         try:
             completion = client.chat.completions.create(
                 model="grok-2-latest",
@@ -72,14 +79,30 @@ El que madruga encuentra.
                     },
                 ],
             )
-            assert completion.choices[0].message.content.split("@@@")[1].strip().count("\n") == content.strip().count("\n")
-            print(completion.choices[0].message.content.split("@@@")[1].strip())
-            break
+            response = completion.choices[0].message.content.split("@@@")[1].strip()
+            assert response.count("\n") == content.strip().count("\n")
+            print(response)
+            return response
         except AssertionError:
             print("translation line numbers dont match, retrying")
             print("content:")
             print(content)
             print("translation:")
-            print(completion.choices[0].message.content.split("@@@")[1].strip())
+            print(response)
             print("end")
-    return completion.choices[0].message.content.split("@@@")[1].strip()
+    print("failing 3 times in a row, giving up and force adjusting line number")
+    if response.count("\n") > content.strip().count("\n"):
+        response = "\n".join(response.splitlines()[:n])
+        print("too many line!")
+    elif response.count("\n") < content.strip().count("\n"):
+        response_lines = response.count("\n") + 1
+        response = "\n".join(response.splitlines() + [response.splitlines()[-1] for i in range(n - response_lines)])
+        print("too less line")
+    print("adjust line number:")
+    print("content:")
+    print(content)
+    print("translation:")
+    print(response)
+    print("end")
+    assert response.count("\n") == content.strip().count("\n")
+    return response

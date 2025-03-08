@@ -9,3 +9,6 @@
 .DS_Store
 /audio
 /data
+/input
+/output
+/archive
